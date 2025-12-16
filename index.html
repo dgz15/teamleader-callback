@@ -178,21 +178,30 @@
         <!-- Manual Code Entry State -->
         <div id="manual" class="hidden">
             <div class="icon icon-manual">&#128203;</div>
-            <h1>Code d'autorisation</h1>
-            <p>La transmission automatique a echoue. Copiez ce code et collez-le dans l'application:</p>
+            <h1>Finaliser la connexion</h1>
+            <p>Cliquez sur le bouton ci-dessous pour finaliser la connexion depuis votre reseau local:</p>
             <div class="code-container">
-                <input type="text" id="code-input" class="code-input" readonly>
-                <button class="btn btn-primary" onclick="copyCode()">Copier le code</button>
+                <a id="redirect-link" href="#" class="btn btn-primary" style="display: inline-block; margin-bottom: 12px;">
+                    Finaliser la connexion
+                </a>
+                <p style="font-size: 12px; color: #666; margin-top: 8px;">
+                    Si le bouton ne fonctionne pas, copiez ce lien et ouvrez-le dans votre navigateur:
+                </p>
+                <input type="text" id="code-input" class="code-input" readonly style="font-size: 11px;">
+                <button class="btn btn-secondary" onclick="copyCode()">Copier le lien</button>
             </div>
-            <div id="copied-message" class="copied">Code copie dans le presse-papiers!</div>
-            <p style="font-size: 14px; color: #888;">Puis retournez a l'application et collez le code.</p>
+            <div id="copied-message" class="copied">Lien copie dans le presse-papiers!</div>
         </div>
     </div>
 
     <script>
-        // Configuration
-        const LOCAL_API_URL = 'http://localhost:3000/api/oauth/teamleader/callback';
-        const TIMEOUT_MS = 5000;
+        // Configuration - URLs des serveurs (dev + production)
+        const SERVERS = [
+            { name: 'localhost', url: 'http://localhost:3000/api/oauth/teamleader/callback' },
+            { name: 'production', url: 'http://10.0.0.3:3000/api/oauth/teamleader/callback' }
+        ];
+        const LOCAL_SERVER_IP = '10.0.0.3'; // Pour le lien manuel
+        const TIMEOUT_MS = 3000;
 
         // Parse query parameters
         function getQueryParams() {
@@ -224,9 +233,11 @@
             showState('error');
         }
 
-        // Show manual code entry
+        // Show manual code entry with redirect link
         function showManualMode(code) {
-            document.getElementById('code-input').value = code;
+            const callbackUrl = `http://${LOCAL_SERVER_IP}:3000/api/oauth/teamleader/callback?code=${encodeURIComponent(code)}`;
+            document.getElementById('redirect-link').href = callbackUrl;
+            document.getElementById('code-input').value = callbackUrl;
             showState('manual');
         }
 
@@ -261,21 +272,18 @@
             }
         }
 
-        // Send code to local application
-        async function sendCodeToLocalApp(code) {
+        // Try to send code to a specific server
+        async function tryServer(serverUrl, code) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
             try {
-                const response = await fetch(LOCAL_API_URL, {
+                const response = await fetch(serverUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code }),
                     signal: controller.signal
                 });
-
                 clearTimeout(timeoutId);
 
                 if (!response.ok) {
@@ -284,33 +292,40 @@
                 }
 
                 const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Echec');
+                }
+                return { success: true };
+            } catch (err) {
+                clearTimeout(timeoutId);
+                return { success: false, error: err };
+            }
+        }
 
-                if (data.success) {
+        // Send code to local application - try all servers
+        async function sendCodeToLocalApp(code) {
+            console.log('Trying to connect to servers...');
+
+            for (const server of SERVERS) {
+                console.log(`Trying ${server.name}: ${server.url}`);
+                const result = await tryServer(server.url, code);
+
+                if (result.success) {
+                    console.log(`Success with ${server.name}!`);
                     showState('success');
                     // Notify parent window if in popup
                     if (window.opener) {
                         window.opener.postMessage({ type: 'teamleader-oauth-success' }, '*');
                         setTimeout(() => window.close(), 2000);
                     }
-                } else {
-                    throw new Error(data.error || 'Echec de l\'authentification');
+                    return;
                 }
-            } catch (err) {
-                clearTimeout(timeoutId);
-
-                // Check if it's a network/CORS error or timeout
-                if (err.name === 'AbortError') {
-                    console.log('Timeout - showing manual mode');
-                    showManualMode(code);
-                } else if (err.name === 'TypeError' && err.message.includes('fetch')) {
-                    // CORS or network error
-                    console.log('Network/CORS error - showing manual mode');
-                    showManualMode(code);
-                } else {
-                    // Server returned an error
-                    showError('Erreur lors de la connexion', err.message);
-                }
+                console.log(`Failed with ${server.name}:`, result.error?.message);
             }
+
+            // All servers failed - show manual mode
+            console.log('All servers failed - showing manual mode');
+            showManualMode(code);
         }
 
         // Main initialization
