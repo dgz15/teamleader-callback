@@ -191,6 +191,18 @@
                 <button class="btn btn-secondary" onclick="copyCode()">Copier le lien</button>
             </div>
             <div id="copied-message" class="copied">Lien copie dans le presse-papiers!</div>
+
+            <!-- Zone d'entrée manuelle du code -->
+            <div class="code-container" style="margin-top: 20px; border-top: 2px solid #e0e0e0; padding-top: 20px;">
+                <p style="font-size: 14px; color: #333; margin-bottom: 12px; font-weight: 600;">
+                    Ou entrez le code OAuth manuellement:
+                </p>
+                <input type="text" id="manual-code-input" class="code-input" placeholder="Collez le code OAuth ici..." style="font-size: 12px; margin-bottom: 12px;">
+                <div style="display: flex; gap: 8px; justify-content: center;">
+                    <button class="btn btn-primary" onclick="submitManualCode()">Envoyer le code</button>
+                </div>
+                <p id="manual-status" style="font-size: 12px; color: #666; margin-top: 8px;"></p>
+            </div>
         </div>
     </div>
 
@@ -260,6 +272,42 @@
                 copiedMsg.classList.add('show');
                 setTimeout(() => copiedMsg.classList.remove('show'), 3000);
             }
+        }
+
+        // Submit manual code
+        async function submitManualCode() {
+            const manualInput = document.getElementById('manual-code-input');
+            const statusEl = document.getElementById('manual-status');
+            const code = manualInput.value.trim();
+
+            if (!code) {
+                statusEl.textContent = 'Veuillez entrer un code';
+                statusEl.style.color = '#c62828';
+                return;
+            }
+
+            statusEl.textContent = 'Envoi en cours...';
+            statusEl.style.color = '#666';
+
+            // Try all servers
+            for (const server of SERVERS) {
+                try {
+                    statusEl.textContent = `Tentative ${server.name}...`;
+                    const result = await tryServer(server.url, code);
+
+                    if (result.success) {
+                        statusEl.textContent = 'Connexion reussie!';
+                        statusEl.style.color = '#2e7d32';
+                        showState('success');
+                        return;
+                    }
+                } catch (err) {
+                    console.log(`Failed with ${server.name}:`, err);
+                }
+            }
+
+            statusEl.textContent = 'Echec de connexion. Verifiez que le serveur est accessible.';
+            statusEl.style.color = '#c62828';
         }
 
         // Close window
